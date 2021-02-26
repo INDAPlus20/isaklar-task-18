@@ -1,13 +1,19 @@
 use encoding_rs::WINDOWS_1252;
-use encoding_rs_io::DecodeReaderBytesBuilder;
-use std::{env::args, fs::File, io::{BufRead, BufReader, Read, Seek, Write}};
+use std::{env::args, fs::File, io::{BufRead, BufReader, Read, Seek, Write}, time::Instant};
 use std::io::SeekFrom;
 
+#[allow(non_upper_case_globals)]
 const magic_size: usize = 30*30*30;
 fn main() {
     let path = args().nth(1).unwrap();
+
+    // This is for generating index file
     //generate_compact_index(path);
+
+    // This is for generating magic file
     //generate_magic_file(path);
+
+    // These are for lookup
     let input = WINDOWS_1252.encode(&path).0;
     find(&input[0..]);
 }
@@ -26,44 +32,55 @@ fn hash(key: &Vec<u8>) -> usize {
     index
 }
 
+#[allow(dead_code)]
 fn generate_compact_index(token_path: String) {
+    let time = Instant::now();
     let token = File::open(token_path).expect("File not found");
-    let buffered = BufReader::new(
-        DecodeReaderBytesBuilder::new()
-            .encoding(Some(WINDOWS_1252))
-            .build(token),
-    );
-    let mut prev_word = "".to_string();
-    let lines= buffered.lines().map(|l| l.unwrap());
-    let mut output_buffer = String::new();
-    for line in lines {
-        let mut split = line.split_whitespace();
-        let word = split.next().unwrap();
-        let pointer = split.next().unwrap();
-        if prev_word == "" {
-            prev_word = word.to_string();
-            output_buffer.push_str(word);
-            output_buffer.push(' ');
-            output_buffer.push_str(pointer);
-        } else if word == prev_word {
-            output_buffer.push(' ');
-            output_buffer.push_str(pointer);
-        } else {
-            prev_word = word.to_string();
-            output_buffer.push('\n');
-            output_buffer.push_str(word);
-            output_buffer.push(' ');
-            output_buffer.push_str(pointer);
-        }
-    }
-    let output = WINDOWS_1252.encode(&output_buffer).0;
-    std::fs::write("index.txt", output).expect("brr");
-}
+    let mut token = BufReader::new(token);
+    let mut word: Vec<u8> = Vec::with_capacity(40);
+    let mut prev_word: Vec<u8> = Vec::with_capacity(40);
+    let mut byte_offset: Vec<u8> = Vec::with_capacity(40);
+    //let mut output_buffer: Vec<u8> = Vec::with_capacity(150_000_000);
+    let mut output = File::create("index.txt").expect("oh no");
+    // check if the word matches anything
+    //println!("Finding word in index file");
+    loop {
+        if let Ok(some) =  token.read_until(b' ', &mut word) {
+            if some == 0 {
+                break;
+            }
 
+        
+        word.pop();
+
+        if word == prev_word{
+            output.write(&[b' ']).expect("byte write fail");
+            
+        } else {
+            output.write(&[b'\n']).expect("byte write fail");
+            output.write_all(&word).expect("byte write fail");
+            output.write(&[b' ']).expect("byte write fail");
+            prev_word = word.clone();
+        }
+
+        token.read_until(b'\n', &mut byte_offset).expect("byte write fail");
+        byte_offset.pop();
+        output.write_all(&byte_offset).expect("byte write fail");
+        word.clear();
+        byte_offset.clear();
+    } else {
+        break;
+    }
+    }
+    output.flush().expect("flushingggggg");
+    println!("Took: {:?}s", time.elapsed().as_secs());
+
+}
+#[allow(dead_code)]
 fn generate_magic_file(index_path: String) {
     let mut index = File::open(index_path).expect("File not found");
     let mut buf: Vec<u8> = Vec::with_capacity(150_000_000);
-    index.read_to_end(&mut buf);
+    index.read_to_end(&mut buf).expect("brr");
     let mut prefix: Vec<u8> = Vec::with_capacity(40);
     let mut array: [u64;magic_size]  = [0; magic_size];
     let mut is_word = true;
@@ -98,7 +115,7 @@ fn generate_magic_file(index_path: String) {
     }
     output.flush().expect("maybe this?");
 }
-
+#[allow(dead_code)]
 fn load_magic_file() -> [u64; magic_size] {
     let mut array = [0; magic_size];
     let mut magic_file = File::open("magic-file.txt").expect("yikes");
@@ -113,6 +130,7 @@ fn load_magic_file() -> [u64; magic_size] {
     return array;
 }
 
+#[allow(dead_code)]
 // Assumes encoded byte-array
 fn find(word: &[u8]) {
     let magic_file = load_magic_file();
@@ -123,45 +141,59 @@ fn find(word: &[u8]) {
         }
         prefix.push(*b);
     }
-    let mut index_offset = magic_file[hash(&prefix)];
-    println!("Index offset: {:?}", index_offset);
-    let mut index_file = File::open("index.txt").expect("No index file found!");
-    let mut index_file = BufReader::new(index_file);
-    let mut read_word: Vec<u8> = Vec::with_capacity(40);
-    let mut current = index_file.seek(SeekFrom::Start(index_offset as u64)).expect("nono");
-    let mut indices: Vec<u64> = Vec::with_capacity(100000);
-    // check if the word matches anything
-    println!("Finding word in index file");
-    loop {
-        index_file.read_until(b' ', &mut read_word);
-        read_word.pop();
-        //println!("Looking for: {:?} Currently at: {:?}", word, read_word);
+    let index_offset = magic_file[hash(&prefix)];
+    if index_offset != 0 {
+        let index_file = File::open("index.txt").expect("No index file found!");
+        let mut index_file = BufReader::new(index_file);
+        let mut read_word: Vec<u8> = Vec::with_capacity(40);
+        let mut _current = index_file.seek(SeekFrom::Start(index_offset as u64)).expect("nono");
+        let mut indices: Vec<u64> = Vec::with_capacity(100000);
+        // check if the word matches anything
+        loop {
+            index_file.read_until(b' ', &mut read_word).expect("brr");
+            read_word.pop();
+            //println!("Looking for: {:?} Currently at: {:?}", word, read_word);
+            
+            if word.to_vec() == read_word {
+                // get all indices
+                let mut buf: String = String::with_capacity(1000);
+                index_file.read_line(&mut buf).expect("brr");
+                indices = buf.split_whitespace().map(|i| i.parse::<u64>().unwrap()).collect();
+                break;
+            } else {
+                if hash(&read_word) != hash(&prefix) {
+                    break;
+                }
+                // go to next line
+                index_file.read_until(b'\n', &mut read_word).expect("brr");
+                read_word.clear();
+                index_file.seek(SeekFrom::Current(0)).expect("brr");
+            }
+        }
+        let mut korpus = File::open("korpus/korpus").expect("Korpus where?");
+        let mut buf = [0; 60];
+        // print at indices
+        println!("Found {:?} occurances", indices.len());
+        for i in 0..indices.len() {
+            if i%30 == 0 {
+                println!("Show next 30? y/n");
+                let mut response: String = String::new();
+                std::io::stdin().read_line(&mut response).expect("Wrong input");
+                let _trim = response.trim();
+                if response.contains("y") || response.contains("Y") {
+                } else {
+                    println!("Aborting ...");
+                    break;
+                }
+            }
+            korpus.seek(SeekFrom::Start(indices[i] - 30)).expect("msg");
+            korpus.read_exact(&mut buf).expect("msg");
+            let decoded = WINDOWS_1252.decode(&buf).0.replace('\n',  " ");
+            println!("...{}...", decoded);
+        }
         
-        if word.to_vec() == read_word {
-            // get all indices
-            let mut buf: String = String::with_capacity(1000);
-            index_file.read_line(&mut buf);
-            indices = buf.split_whitespace().map(|i| i.parse::<u64>().unwrap()).collect();
-            break;
-        } else {
-            // go to next line
-            index_file.read_until(b'\n', &mut read_word);
-            read_word.clear();
-            index_file.seek(SeekFrom::Current(0));
-        }
-    }
-    println!("Done!");
-    let mut korpus = File::open("korpus/korpus").expect("Korpus where?");
-    let bytes = 30;
-    let mut buf = [0; 60];
-    // print at indices
-    println!("Found {:?} occurances", indices.len());
-    for index in indices {
-        korpus.seek(SeekFrom::Start(index - 30));
-        korpus.read_exact(&mut buf);
-        for b in buf.iter() {
-
-        }
+    } else {
+        println!("No word found");
     }
     
 }
@@ -173,7 +205,7 @@ mod test {
     #[test]
     fn magic_time() {
         let timer = Instant::now();
-        let magic = load_magic_file();
+        let _magic = load_magic_file();
         println!("Done! {:?}ms", timer.elapsed().as_millis());
         //print!("{:?}", magic.iter());
     }
