@@ -8,10 +8,10 @@ fn main() {
     let path = args().nth(1).unwrap();
 
     // This is for generating index file
-    //generate_compact_index(path);
+    // generate_compact_index(path);
 
     // This is for generating magic file
-    //generate_magic_file(path);
+    // generate_magic_file(path);
 
     // These are for lookup
     let input = WINDOWS_1252.encode(&path).0;
@@ -170,7 +170,7 @@ fn find(word: &[u8]) {
                 index_file.seek(SeekFrom::Current(0)).expect("brr");
             }
         }
-        let mut korpus = File::open("korpus/korpus").expect("Korpus where?");
+        let mut korpus = File::open("korpus").expect("Korpus need to be in the same directory");
         let mut buf = [0; 60];
         // print at indices
         println!("Found {:?} occurances", indices.len());
